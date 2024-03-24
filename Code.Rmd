@@ -1,6 +1,6 @@
 ---
-title: "DCM assignment 4"
-author: "Yiqiu Wang"
+title: "XXX"
+author: "XXXX"
 date: "2023-03-08"
 header-includes:
     - \usepackage{float}
@@ -17,7 +17,7 @@ library(modelr)
 library(kableExtra)
 library(survival)
 library(ggplot2)
-oscars<-read_csv("C:/Users/wangy/Documents/Dchoicelab6.7/assignment/oscars.csv", col_types=cols(Name="c",Movie="c",.default="i"))
+oscars<-read_csv("yourwd/oscars.csv", col_types=cols(Name="c",Movie="c",.default="i"))
 ```
 # Task 1
 
