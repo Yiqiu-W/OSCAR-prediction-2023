@@ -1,0 +1,328 @@
+---
+title: "DCM assignment 4"
+author: "Yiqiu Wang"
+date: "2023-03-08"
+header-includes:
+    - \usepackage{float}
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE,message = FALSE, fig.align = "center", fig.pos = "H")
+rm(list=ls())
+library(readr)
+library(tidyverse)
+library(modelsummary)
+library(modelr)
+library(kableExtra)
+library(survival)
+library(ggplot2)
+oscars<-read_csv("C:/Users/wangy/Documents/Dchoicelab6.7/assignment/oscars.csv", col_types=cols(Name="c",Movie="c",.default="i"))
+```
+# Task 1
+
+|     The Academy Awards, better known as the Oscars, are awards for artistic and technical merit for the global film industry. The awards are regarded by many as the most prestigious, significant awards in the entertainment industry in the United States. The Oscars has a total of 23 awrad catagories in which the Best Picture Award is one of the most prestigious honors in the film industry. The process of selecting the winner of the Best Picture Award involves a two-stage voting process. In the first stage, members of the Academy nominate films that they believe should be considered for the award. In the second stage, all members of the Academy are given the opportunity to vote on the final nominees and select the winner.
+
+|     In this study, we are interested in which nominations could be the best predictor of the best picture award. Between the director, female lead, and male lead, we believe that the director should be the th best predictor. A director is responsible for various things such as interpretation of the script, communication and collaboration while the actors and actresses perform under the guide of the director. So if a director is given a nomination, the quality of the film is recognized.
+
+|     Oscar awarding question could be seen as a discrete choice problem. Every year, members of the Academy decide which movies should be given the nomination and then vote for the final winner given all movies of the year. Each movies has different attributes such as the quality of costom and the performances of actors/actresses. Discrete choice problems can be modeled using mathematical and statistical methods, such as utility theory, which assumes that individuals have a utility or value for each alternative(movie in our case) based on the attributes associated with it. This utility can be estimated through surveys or experiments, and used to predict which alternative an individual is most likely to choose given a specific set of attributes, that is, which movie is most likely to win the best picture award.
+
+|     Apart from the director, female lead and male lead, we also expect the quality of editing(whether the movie is given the editing nomination), screenplay(whether the movie is given the screenplay nomination), the total number of nominations the movie has as well as Producer's Guild of America(PGA) to play a role in predicting which movie is most likely to win. High quality of edition should have correlation with the performance of the director and high quality of performance are given by actors and actresses who follow the instruction of the director. More nominations indicates the movie is recognized and highly praised from various aspects. So the number of nominations should have a positive effect on the chance of the movie winning the award. PGA has long been awarding its honors to the year’s most distinguished producing effort.
+```{r}
+# We only need to look at the movies which had the best picture nominatiosn
+oscars <- oscars |> 
+  filter(PP == 1) |> 
+  select(-PP,-DD,-MM,-FF,-Name,-Comp,-No) 
+# Departed won the best picture award in 2006. Code it 1 in the "ch" column
+oscars[2,2] <- 1
+```
+
+
+```{r,include=FALSE}
+# Check for correlations
+oscars |> 
+  select(Dir,Aml,Afl,Cos,Mak,Edi) |> 
+  model.matrix(~.,data =_) |> 
+  cor()
+```
+
+
+```{r}
+# Based on "ch", create a new variable that is coded 1 if the movie did win the best picture award that year and 0 otherwise
+# Create "id" based on the year of the Oscar
+oscars <- oscars |> 
+  mutate(Choice = as.integer(ifelse(Ch == 1,1,0)),
+         id = 2007-Year)
+
+# Descriptive table
+oscars_x <- oscars |> 
+  mutate(Choice_x = as.factor(Choice))
+table_1 <- datasummary((Heading("")*1+Heading("Choice")*Choice_x)*(Heading("Director Nomination")*Dir+Heading("Lead Actor Nomination")*Aml+Heading("Lead Actress Nomination")*Afl + Heading("Editing Nomination")*Edi + Heading("Screenplay Nomination")*Scr + Heading("Producer's Guild of America win")*PGA + Heading("Number of Nominations")*Nom)~Mean+SD+Min+Max+N+Percent(), 
+            data= oscars_x,
+            fmt = 2,
+            title = "Descriptive Statistics for Oscar winner Movies of the best picture award(1928-2006)",
+            notes = c("Based on Oscar nominees and winners from 1928 to 2006",
+                      "Choice is a dummy variable which is coded 1 if the movie won the best picture award","and 0 otherwise."),
+            booktabs=TRUE)|> 
+  pack_rows(index=c("All nominated movies"=7,
+                    "Award Non-winner Movies"=7,
+                    "Award winner Movies"=7),
+            bold=T) 
+table_1 |>  kable_styling(latex_options = "hold_position")
+```
+
+|     In Table 1, we could see the descriptive statistics on 7 nominations which we believe would help us predict the winner of the best picture award more accurately,split by whether the picture won the Academy Award or not. 17.47% of all nominated movies won the best picture award.
+
+|     The average of having the director nomination equals to 0.62. For Non-winner movies, the index is lower than average but for the winner movies. But for winner movies, the average index(0.95) show that it is almost certain that the directors of the winner movies must have the nomination. This to some extent goes inline with our expectation that the director should be the best predictor of the the best picture award. In general, the actors and actresses of the winner movies were more recognized than those of non-winner movies(having more nominations). But the average indices of the lead actor and actress nominations for winner movies(0.71 and 0.38) is not so high as that of the director nomination. The indices are almost too low to say this nomination would actually have correlation the award. 
+
+|     The average index of editing nomination(0.42) of non-winner movies is lower than that of all nominated movies(0.49) as well as that of winner movies(0.80). Winner movies' editing was more recognized.
+
+|     The average indices of screenplay nomination of both non-winner movies(0.70) and winner-movies(0.92) are low considering the maximum number of this nomination could reach 2. Maybe this nomination is not a very good predictor for the award.
+
+|     About half of winner movies(0.55) also won the Producer's Guild of America while the number of non-winner movies winning the PGA is scarce(only 0.04 of all non-winner movies). So PGA could also be a strong predictor.
+
+|     As we expect, winner movies had more nominations than non-winner movies.
+
+```{r}
+# m1 is the basic model which we only include the nominations of the director, lead male and lead female
+m1 <- clogit(Choice~Dir+Aml+Afl+strata(id),data=oscars)
+# In m2, we also include the nominations of editing, Producer's Guild of America and the number of nominations
+m2 <- clogit(Choice~Dir+Aml+Afl+Edi+PGA+Nom+strata(id),data=oscars)
+model_1_2 <- list("Model 1" = m1,
+                  "Model 2" = m2)
+modelsummary(model_1_2,
+             coef_rename = c("Dir"="Director Nomination",
+                             "Aml"="Lead Actor Nomination",
+                             "Afl"="Lead Actress Nomination",
+                             "Edi"="Editing Nomination",
+                             "PGA"="Producer's Guild of America win",
+                             "Nom"="Number of Nominations"),
+             fmt = 3,
+             stars = TRUE,
+             exponentiate = TRUE,
+             title = "Results of conditional logit models estimating how various nominations affect the likelihood of a movie winning the best picture award") |> 
+  footnote("Based on Oscar nominees and winners from 1928 to 2006") |> 
+  kable_styling(latex_options = "hold_position")
+
+# (plot)results from m2
+tidy(m2, exponentiate = TRUE, conf.int = TRUE) |> 
+  filter(term != "(Intercept)") |> 
+  ggplot(aes(term,estimate)) +
+  geom_hline(yintercept = 1, colour = "red", linetype = "dashed") +
+  geom_point()+
+  geom_errorbar(aes(ymin = conf.low, ymax = conf.high, width = .1)) +
+  labs(title = "Graph 1: A conditional logit model on how various nominations affect 
+       the likelihood of a movie winning the Oscar award(Best Picture)",
+       x = "nominations",
+       y = "Odds ratios",
+       caption = "Based on Oscar nominees and winners from 1928 to 2006")
+```
+
+
+```{r,include=FALSE}
+# likelihood ratio test
+lmtest::lrtest(m1,m2)
+```
+
+
+```{r}
+# make a table based on the results of the likelihood ratio test
+df <- data.frame("Model 1" = c(-108.751,"/","/","/"),
+                 "Model 2" = c(-65.971,3,85.558,"< 2.2e-16"))
+rownames(df) = c("Loglik","DF(compared to Model 1)","Chisq(compared to Model 1)","Pr(>Chisq)(compared to Model 1)")
+kable(df, format = "latex", caption = "Model fit statistics", align = "c", col.names = c('Model 1', 'Model 2')) |> 
+  kable_styling(bootstrap_options = "striped", 
+                full_width = FALSE, 
+                position = "center",
+                latex_options = "hold_position")
+```
+
+|     We ran two conditional logit models here. Model 1 is the basic model which we only included the nominations of the director, lead male and lead female and in Model 2 we also included the nominations of editing, Producer's Guild of America and the number of nominations. The right part of Table 2 and Graph 1 shows the results(odds ratio) of Model 2.
+
+|     Between director, male lead and female lead, the director nomination is the only variable that has a significant effect(p < 0.001) on the likelihood of winning the best picture award. After the director is given a nomination, the odds of winning the award are increased by a factor of 7.075. Having an editing nomination significantly(p < 0.01) increases the odds of winning the award by a factor of 4.052. Winning Producer's Guild of America(PGA) significantly(p < 0.001) increases the odds of winning the award by a factor of 8.428. The positive effect is even greater than that of the director nomination. Every additional nomination significantly(p < 0.05) increases the odds of winning the award by a factor of 1.225.
+
+|     Both AIC and BIC of Model 2 are lower than those of Model 1(the basic model) which suggests a better model fit. This is also true when we ran a likelihood ratio test(Table 3) on Model 1 and Model 2. The log likelihood increases obviously when we move from the basic model(Model 1) to our Model 2. The Chisq is great and the p-value which is less than 2.2e-16(<0.001) is significant when we compare Model 2 to Model 1. So Model 2 should be the preferred model.
+
+|     Based on the results, winning Producer's Guild of America and having a director nomination are actually very good predictors of whether the movie will win the best picture award. Having more nominations and the editing nomination also make a movie more likely to win though their positive effect are not so strong as those of winning Producer's Guild of America and having a director nomination. It does become clear that the director is the key to winning the best picture award rather than the male lead and female lead.
+
+# Task 2
+
+|     Based on the results of Task 1, we expect our preferred model to be Model 2 which includes Director Nomination, Lead Actor Nomination, Lead Actress Nomination, Editing Nomination, Producer's Guild of America win, Number of Nomination. The Director Nomination and Producer's Guild of America have been proved to be strong predictor of winning the best picture award.
+
+|     In Table 4, we ran two other models. In Alternative 1, we dropped Producer's Guild of America and Number of Nominations from Model 2. In Alternative 2, we added Screenplay Nomination to Model 2. Model 2 has the lowest AIC and BIC among all 4 models. So it has the best model fit.
+
+```{r}
+# Run three alternative models
+m3 <- clogit(Choice~Dir+Aml+Afl+Edi+strata(id),data=oscars)
+m4 <- clogit(Choice~Dir+Aml+Afl+Edi+Scr+PGA+Nom+strata(id),data=oscars)
+
+new_models <- list("Basic Model" = m1,
+               "Alternative 1" = m3, 
+               "Model 2" = m2,
+               "Alternative 2" = m4)
+modelsummary(new_models,
+             coef_rename = c("Dir"="Director Nomination",
+                             "Aml"="Lead Actor Nomination",
+                             "Afl"="Lead Actress Nomination",
+                             "Edi"="Editing Nomination",
+                             "Scr"="Screenplay Nomination",
+                             "PGA"="Producer's Guild of America win",
+                             "Nom"="Number of Nominations"),
+             fmt = 3,
+             stars = TRUE,
+             exponentiate = TRUE,
+             title = "Results of conditional logit models estimating how various nominations affect the likelihood of a movie winning the best picture award") |> 
+  footnote("Based on Oscar nominees and winners from 1928 to 2006") |> 
+  kable_styling(latex_options = "hold_position")
+```
+|     In Alternative 1, Lead Actor Nomination has a significant(p < 0.05) effect on the likelihood of a movie winning the prize. With this nomination, the odds of winning the award are increased by a factor of 1.836. The positive effect of having a editing nomination is stronger than that in Model 2.
+
+|     After adding Screenplay Nomination to our Model 2, neither the number of nominations nor having the screenplay nomination has a significant effect on the likelihood of a movie winning the award in Alternative 2. 
+```{r,include=FALSE}
+# likelihood ratio test
+lmtest::lrtest(m3,m2)
+lmtest::lrtest(m2,m4)
+```
+
+```{r}
+# make a table based on the results of the likelihood ratio test
+df_2 <- data.frame("Alternative 1" = c("-94.094","/","/","/"),
+                 "Model 2" = c("-65.971","2","56.245","6.119e-13"),
+                 "Alternative 2" = c("-65.234","1","1.4744","0.2247"))
+rownames(df_2) = c("Loglik","DF(compared to former model)","Chisq(compared to former model)","Pr(>Chisq)(compared to former model)")
+kable(df_2, format = "latex", caption = "Model fit statistics on three models", align = "c", col.names = c('Alternative 1', 'Preferred Model','Alternative 2')) |> 
+  kable_styling(bootstrap_options = "striped", 
+                full_width = FALSE, 
+                position = "center",
+                latex_options = "hold_position")
+```
+
+
+|     We also ran likelihood ratio tests to compare Model 2 to the two alternatives. The results are shown in Table 5. When we compare Model 2 to Alterantive 1, the log likelihood increases. The Chisq is also great and the p-value($6.119e-13$,< 0.001) shows Model 2 is indeed a preferred model than Alternative 1. When we compare Alternative 2 to Model 2, the log likelihood hardly changes. The Chisq is small and the p-value which equals to 0.2247 is insignificant. Although Alternative 2 has one more variable than Model 2, it does not have a better model fit. So we should use Model 2(our preferred model) instead of the two alternatives.
+
+
+```{r}
+# Estimate which model has the highest rate of correct prediction
+
+## The rate of correct prediction using preferred model(m2)
+# Predict the probability of every movie winning the award(group by year) from 1928 to 2006
+# Create a new data frame "m2_pred" which contains the everything in oscars data frame as well the predicted probabilities we got
+# Group the new data frame by year again. Create a new column called "win" in which if a movie of a certain year has the highest probability of winning, code it 1 and 0 otherwise
+# select the columns we need for simplification
+m2_pred <- oscars |>
+  group_by(Year) |> 
+  bind_cols(Xb=predict(m2,type="lp",newdata=oscars)) |>
+  mutate(Pr=exp(Xb)) |> 
+  mutate(Pr=round(Pr/sum(Pr),4)) |> 
+  group_by(Year) |> 
+  mutate(win = ifelse(Pr == max(Pr),1L,0L)) |> 
+  select(Year,id,Movie,Pr,win,Choice)
+# Now we can calculate the rate of correct prediction
+# Divide the number of rows which "win" and "Choice" are both 1(correct winners) by the number of rows which "Choice" is coded 1(total number of winners)
+
+# number of years
+N <- 2006-1928+1
+# sum(m2_pred$win == m2_pred$Choice) match rows
+# nrow(m2_pred)-sum(m2_pred$win == m2_pred$Choice) = 2 not matched rows
+# (nrow(m2_pred)-sum(m2_pred$win == m2_pred$Choice)) / 2 = 1   not matched Year
+# N-(nrow(m2_pred)-sum(m2_pred$win == m2_pred$Choice)) / 2   matched Year 
+
+m2_correct_n <- N-(nrow(m2_pred)-sum(m2_pred$win == m2_pred$Choice)) / 2
+m2_correct_rate <- m2_correct_n/N |> 
+                   round(4)    # number of matched Year / number of Year
+
+# Do the same for the basic model, Alternative 1 and Alternative 2
+# basic model(m1)
+m1_pred <- oscars |>
+  group_by(Year) |> 
+  bind_cols(Xb=predict(m1,type="lp",newdata=oscars)) |>
+  mutate(Pr=exp(Xb)) |> 
+  mutate(Pr=round(Pr/sum(Pr),4)) |> 
+  group_by(Year) |> 
+  mutate(win = ifelse(Pr == max(Pr),1L,0L)) |> 
+  select(Year,id,Movie,Pr,win,Choice)
+m1_correct_n <- N-(nrow(m1_pred)-sum(m1_pred$win == m1_pred$Choice)) / 2
+m1_correct_rate <- m1_correct_n/N |> 
+                   round(4)
+
+# Alternative 1(model 3)
+m3_pred <- oscars |>
+  group_by(Year) |> 
+  bind_cols(Xb=predict(m3,type="lp",newdata=oscars)) |>
+  mutate(Pr=exp(Xb)) |> 
+  mutate(Pr=round(Pr/sum(Pr),4)) |> 
+  group_by(Year) |> 
+  mutate(win = ifelse(Pr == max(Pr),1L,0L)) |> 
+  select(Year,id,Movie,Pr,win,Choice)
+m3_correct_n <- N-(nrow(m3_pred)-sum(m3_pred$win == m3_pred$Choice)) / 2
+m3_correct_rate <- m3_correct_n/N |>
+                   round(4)
+
+# Alternative 2(model 4)
+m4_pred <- oscars |>
+  group_by(Year) |> 
+  bind_cols(Xb=predict(m4,type="lp",newdata=oscars)) |>
+  mutate(Pr=exp(Xb)) |> 
+  mutate(Pr=round(Pr/sum(Pr),4)) |> 
+  group_by(Year) |> 
+  mutate(win = ifelse(Pr == max(Pr),1L,0L)) |> 
+  select(Year,id,Movie,Pr,win,Choice)
+m4_correct_n <- N-(nrow(m4_pred)-sum(m4_pred$win == m4_pred$Choice)) / 2
+m4_correct_rate <- m4_correct_n/N |> 
+                   round(4)
+```
+
+
+```{r}
+# A table containing the correct prediction rate of all 4 models
+df_3 <- data.frame("Model" = c("Basic Model", "Model 2","Alternative 1","Alternative 2"),
+                   "Corrrect Prediction Rate" = c(m1_correct_rate,m2_correct_rate,m3_correct_rate,m4_correct_rate))
+kable(df_3, format = "latex", caption = "Model prediction statistics(1928-2006)", align = "c", col.names = c('Model', 'Corrrect Prediction Rate')) |> 
+  kable_styling(bootstrap_options = "striped", 
+                full_width = FALSE, 
+                position = "center",
+                latex_options = "hold_position")
+```
+
+|     Table 6 shows the correct prediction rates of the 4 models. Model 2, our preferred model, has the highest correct prediction rate(about 69%) among all models.
+
+```{r}
+# Create a tibble that contains the nomination conditions of the 10 movies that were nominated the best picture for Oscars 2023
+newaward <- data.frame(Year = rep(2022,10),
+                  id = c(1:10),
+                  Movie=factor(c("All Quiet on the Western Front","Avatar: The Way of Water","The Banshees of Inisherin","Elvis","Everything Everywhere All at Once","The Fabelmans","Tár","Top Gun: Maverick","Triangle of Sadness","Women Talking")),
+               Dir=c(0,0,1,0,1,1,1,0,1,0),
+               Aml=c(0,0,1,1,0,0,0,0,0,0),
+               Afl=c(0,0,0,0,1,1,1,0,0,0),
+               Edi=c(0,0,1,1,1,0,1,1,0,0),
+               PGA=c(0,0,0,0,1,0,0,0,0,0),
+               Nom=c(9,4,9,8,11,7,6,6,3,2))
+kable(newaward, format = "latex", caption = "Movies competing for the best picture in  Oscars 2023") |>
+  kable_styling(bootstrap_options = "striped", 
+                full_width = FALSE, 
+                position = "center",
+                latex_options = "hold_position")
+```
+
+|     In Table 7, we recorded the nominations of the movies competing for the best picture award in Oscar 2023 that would be used to make prediction for the winner movie. Dir is the Director Nomination, Aml is the Lead Actor Nomination, Afl is the Lead Actress Nomination, Edi is the Editing Nomination , PGA stands for winning Producer's Guild of America, Nom is the total number of nominations. Before we start our predictions using our preferred model(Model 2), we can see that Everything Everywhere All at Once has the most number of nominations. It also won the Producer's Guild of America which we know from the results of Model 2 is a very strong predictor. The director is also given a nomination. Then The Banshees of Inisherin, though did not win the Producer's Guild of America, has the second most number of nominations and a nomination for the director. These two movies are very likely to win the best picture award.
+
+```{r}
+# Predict the probability of each movie winning the award
+# Put the results in one table
+my_pre_results <- newaward |>
+  bind_cols(Xb=predict(m2,type="lp",newdata=newaward)) |>
+  mutate(Pr=exp(Xb)) |> 
+  mutate(Pr=round(Pr/sum(Pr),4)) |> 
+  select(Year,id,Movie,Pr) |> 
+  as.data.frame() 
+kable(my_pre_results, format = "latex", caption = "Prediction of the best-picture winner movie of Oscars 2023", align = "c", col.names = c('Year', 'id','Movie Name','Predicted Probability of Winning')) |> 
+  kable_styling(bootstrap_options = "striped", 
+                full_width = FALSE, 
+                position = "center",
+                latex_options = "hold_position")
+```
+
+|     Based on the results in Table 8, it seem that the Movie Everything Everywhere All at Once has the highest probability(73.14%) of winning the best picture award in 2023 among all 10 movies. The Banshees of Inisherin is the second most likely to win the award with a probability equals to 0.1168. But apart from Everything Everywhere All at Once, the probability of other movies winning the award are all very low.
+
+|     In conclusion, we expect Everything Everywhere All at Once to the winner of the best picture award in 2023.
+
